@@ -51,7 +51,7 @@ for i in range(0, len(articles)-1):
 
             pic_cropped = qiniu_upload(local_file, key)
             with open("{}".format(key), 'wb') as f:
-                f.write(pic.content)
+                f.write(pic_cropped.content)
 
             uploadbot = UploadRobot(url=[key], description="Biz article cover uploaded by bot", keepFilename=True,
                                     verifyDescription=False, ignoreWarning=True)
