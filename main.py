@@ -10,6 +10,8 @@ from pywikibot.specialbots import UploadRobot
 import time
 from config import *
 from qiniu_pics import qiniu_upload
+import json
+import os
 
 template_homepage = "<includeonly>\n<div style=\"width:100%\">\n{{{{Panel\n|pic    = {pic}\n|title  = {title}\n|tag    = 文/{author}\n|link   = {link}\n}}}}\n</div>\n</includeonly>"
 site = pywikibot.Site('zh', 'kcwiki')
@@ -19,44 +21,59 @@ page = pywikibot.Page(site, "Template:首页轮播")
 header = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36'}
 pattern = r'var msg_cdn_url\s*=\s*\"(.*)\"'
 feed = feedparser.parse(biz_rss_url)
-
 articles = [
     {
         "title": feed.entries[0].title,
         "link": feed.entries[0].link,
-        "author": feed.entries[0].author
+        "author": feed.entries[0].author,
+        "update": feed.entries[0].published
     },
     {
         "title": feed.entries[1].title,
         "link": feed.entries[1].link,
-        "author": feed.entries[1].author
+        "author": feed.entries[1].author,
+        "update": feed.entries[1].published
     }
 ]
 
 count = 0
-for i in range(0, len(articles)-1):
-    web = requests.get(articles[i]["link"], headers=header)
-    soup = BeautifulSoup(web.text, 'lxml')
-    js = soup.find_all("script")
-    for each in js:
-        match = re.search(pattern, str(each), flags=re.M|re.I)
-        if match is not None:
-            articles[i]["cover"] = match.groups()[0]
-            print(match.groups()[0])
-            pic = requests.get(match.groups()[0], headers=header)
-            with open("pic.jpeg", 'wb') as f:
-                f.write(pic.content)
-            local_file = 'pic.jpeg'
-            key = "{}.jpeg".format(int(time.time()))
+if os.path.exists('lastupdated.json'):
+    with open('lastupdated.json', 'r') as f:
+        lastupdated = json.load(fp=f)
 
-            pic_cropped = qiniu_upload(local_file, key)
-            with open("{}".format(key), 'wb') as f:
-                f.write(pic_cropped.content)
+else:
+    lastupdated = None
 
-            uploadbot = UploadRobot(url=[key], description="Biz article cover uploaded by bot", keepFilename=True,
-                                    verifyDescription=False, ignoreWarning=True)
-            uploadbot.run()
-            articles[i]["cover"] = key
-page.text = template_homepage.format(pic=articles[0]["cover"], link=articles[0]["link"], title=articles[0]["title"],
-                                     author=articles[0]["author"])
-page.save("biz update")
+if lastupdated is None or not (articles[0]["title"] == lastupdated["title"] and articles[0]["update"] == lastupdated["update"]):
+    for i in range(0, len(articles)-1):
+        web = requests.get(articles[i]["link"], headers=header)
+        soup = BeautifulSoup(web.text, 'lxml')
+        js = soup.find_all("script")
+        for each in js:
+            match = re.search(pattern, str(each), flags=re.M|re.I)
+            if match is not None:
+                articles[i]["cover"] = match.groups()[0]
+                print(match.groups()[0])
+                pic = requests.get(match.groups()[0], headers=header)
+                with open("pic.jpeg", 'wb') as f:
+                    f.write(pic.content)
+                local_file = 'pic.jpeg'
+                key = "{}.jpeg".format(int(time.time()))
+
+                pic_cropped = qiniu_upload(local_file, key)
+                with open("{}".format(key), 'wb') as f:
+                    f.write(pic_cropped)
+
+                uploadbot = UploadRobot(url=[key], description="Biz article cover uploaded by bot", keepFilename=True,
+                                        verifyDescription=False, ignoreWarning=True)
+                uploadbot.run()
+                articles[i]["cover"] = key
+
+    page.text = template_homepage.format(pic=articles[0]["cover"], link=articles[0]["link"], title=articles[0]["title"],
+                                         author=articles[0]["author"])
+
+    page.save("biz update")
+    with open('lastupdated.json', 'w') as f:
+        f.write(json.dumps(articles[0], ensure_ascii=False))
+else:
+    print("Nothing new found")
