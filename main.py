@@ -20,60 +20,73 @@ page = pywikibot.Page(site, "Template:首页轮播")
 
 header = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36'}
 pattern = r'var msg_cdn_url\s*=\s*\"(.*)\"'
-feed = feedparser.parse(biz_rss_url)
-articles = [
-    {
-        "title": feed.entries[0].title,
-        "link": feed.entries[0].link,
-        "author": feed.entries[0].author,
-        "update": feed.entries[0].published
-    },
-    {
-        "title": feed.entries[1].title,
-        "link": feed.entries[1].link,
-        "author": feed.entries[1].author,
-        "update": feed.entries[1].published
-    }
-]
 
-count = 0
-if os.path.exists('lastupdated.json'):
-    with open('lastupdated.json', 'r') as f:
-        lastupdated = json.load(fp=f)
 
-else:
-    lastupdated = None
+def update_article(article):
+    web = requests.get(article["link"], headers=header)
+    soup = BeautifulSoup(web.text, 'lxml')
+    js = soup.find_all("script")
+    for each in js:
+        match = re.search(pattern, str(each), flags=re.M | re.I)
+        if match is not None:
+            article["cover"] = match.groups()[0]
+            print(match.groups()[0])
+            pic = requests.get(match.groups()[0], headers=header)
+            with open("pic.jpeg", 'wb') as f:
+                f.write(pic.content)
+            local_file = 'pic.jpeg'
+            key = "{}.jpeg".format(int(time.time()))
 
-if lastupdated is None or not (articles[0]["title"] == lastupdated["title"] and articles[0]["update"] == lastupdated["update"]):
-    for i in range(0, len(articles)-1):
-        web = requests.get(articles[i]["link"], headers=header)
-        soup = BeautifulSoup(web.text, 'lxml')
-        js = soup.find_all("script")
-        for each in js:
-            match = re.search(pattern, str(each), flags=re.M|re.I)
-            if match is not None:
-                articles[i]["cover"] = match.groups()[0]
-                print(match.groups()[0])
-                pic = requests.get(match.groups()[0], headers=header)
-                with open("pic.jpeg", 'wb') as f:
-                    f.write(pic.content)
-                local_file = 'pic.jpeg'
-                key = "{}.jpeg".format(int(time.time()))
+            pic_cropped = qiniu_upload(local_file, key)
+            with open("{}".format(key), 'wb') as f:
+                f.write(pic_cropped)
 
-                pic_cropped = qiniu_upload(local_file, key)
-                with open("{}".format(key), 'wb') as f:
-                    f.write(pic_cropped)
-
-                uploadbot = UploadRobot(url=[key], description="Biz article cover uploaded by bot", keepFilename=True,
+            uploadbot = UploadRobot(url=[key], description="Biz article cover uploaded by bot", keepFilename=True,
                                         verifyDescription=False, ignoreWarning=True)
-                uploadbot.run()
-                articles[i]["cover"] = key
+            uploadbot.run()
+            article["cover"] = key
 
-    page.text = template_homepage.format(pic=articles[0]["cover"], link=articles[0]["link"], title=articles[0]["title"],
-                                         author=articles[0]["author"])
+    page.text = template_homepage.format(pic=article["cover"], link=article["link"], title=article["title"],
+                                         author=article["author"])
 
     page.save("biz update")
     with open('lastupdated.json', 'w') as f:
-        f.write(json.dumps(articles[0], ensure_ascii=False))
-else:
-    print("Nothing new found")
+        f.write(json.dumps(article, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    feed = feedparser.parse(biz_rss_url)
+    articles = []
+
+    for item in feed.entries:
+        dic = dict()
+        dic["title"] = item["title"]
+        dic["link"] = item["link"]
+        dic["author"] = item["author"]
+        dic["update"] = time.mktime(time.strptime(item["published"], "%a, %d %b %Y %H:%M:%S %Z"))
+        articles.append(dic)
+
+    if os.path.exists('lastupdated.json'):
+        with open('lastupdated.json', 'r') as f:
+            lastupdated = json.load(fp=f)
+    else:
+        lastupdated = None
+
+    if lastupdated is None:
+        for article in articles:
+            if "百科娘说两句" in article["title"]:
+                continue
+
+            update_article(article)
+            break
+    else:
+        for article in articles:
+            if article["title"] == lastupdated["title"] and article["update"] == lastupdated["update"]:
+                continue
+            elif "百科娘说两句" in article["title"]:
+                continue
+            elif lastupdated["update"] - article["update"] < 86400 or article["update"] > lastupdated["update"]:
+                update_article(article)
+                break
+
+
