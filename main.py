@@ -74,7 +74,7 @@ if __name__ == "__main__":
 
     if lastupdated is None:
         for article in articles:
-            if "百科娘说两句" in article["title"]:
+            if "百科娘说两句" in article["title"] or "小说" in article["title"]:
                 continue
 
             update_article(article)
